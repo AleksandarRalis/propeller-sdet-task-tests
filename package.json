@@ -1,0 +1,25 @@
+{
+  "name": "propeller-graphql-api-tests",
+  "version": "1.0.0",
+  "description": "Automated API test suite for the Propeller multi-tenant e-commerce GraphQL API (Products & Images).",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "graphql": "^16.10.0",
+    "graphql-request": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.10.5",
+    "dotenv": "^16.4.7",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}

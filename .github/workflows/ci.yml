@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      api_repo_url:
+        description: 'Git URL of the GraphQL API repository to test against'
+        required: false
+
+env:
+  # Location of the API under test. Override via the repository/organization
+  # variable `API_REPO_URL`, or the workflow_dispatch input above.
+  API_REPO_URL: ${{ github.event.inputs.api_repo_url || vars.API_REPO_URL }}
+  API_REF: ${{ vars.API_REF || 'main' }}
+  API_URL: http://localhost:3000/graphql
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out test project
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check / build
+        run: npm run build
+
+      - name: Check out API under test
+        run: |
+          if [ -z "${API_REPO_URL}" ]; then
+            echo "::error::API_REPO_URL is not set. Define it as a repository variable or pass it via workflow_dispatch."
+            exit 1
+          fi
+          git clone --depth 1 --branch "${API_REF}" "${API_REPO_URL}" api-under-test
+
+      - name: Start API and database
+        working-directory: api-under-test
+        run: docker compose up -d --build
+
+      - name: Wait for the GraphQL API to be ready
+        run: |
+          echo "Waiting for ${API_URL} ..."
+          for i in $(seq 1 60); do
+            if curl -fs -X POST "${API_URL}" \
+              -H 'Content-Type: application/json' \
+              -H 'x-tenant-id: tenant-a' \
+              -d '{"query":"{ __typename }"}' >/dev/null; then
+              echo "API is up."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::API did not become ready in time."
+          exit 1
+
+      - name: Seed the database
+        working-directory: api-under-test
+        run: docker compose run --rm seed
+
+      - name: Run API tests
+        run: npm test
+
+      - name: Dump API logs on failure
+        if: failure()
+        working-directory: api-under-test
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        working-directory: api-under-test
+        run: docker compose down -v
