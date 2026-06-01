@@ -1,0 +1,59 @@
+name: CI
+
+# CI for the test suite itself.
+#
+# The full end-to-end run (suite vs. a live API) is driven from the GraphQL API
+# repository on every push there — see `ci-templates/api-repo/graphql-api-tests.yml`
+# and the "Continuous Integration" section of the README.
+#
+# Here we keep things fast and secret-free:
+#   - `typecheck` runs on every push/PR so the suite always compiles.
+#   - `run-against-url` is a manual escape hatch to point the suite at any
+#     already-running API instance (e.g. a deployed/preview environment).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: "GraphQL endpoint to run the suite against (leave empty to skip)"
+        required: false
+        default: ""
+
+jobs:
+  typecheck:
+    name: Type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type-check (tsc --noEmit)
+        run: npm run build
+
+  run-against-url:
+    name: Run suite against a live API
+    if: github.event_name == 'workflow_dispatch' && inputs.api_url != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run tests
+        env:
+          API_URL: ${{ inputs.api_url }}
+        run: npm test

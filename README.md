@@ -113,12 +113,43 @@ API build, the following specs fail and point at real defects in the API source
 
 ## Continuous Integration
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and
-pull request. It installs dependencies, type-checks, clones the API repository,
-starts it with Docker Compose, waits for the GraphQL endpoint, seeds the
-database, and runs the suite.
+CI is split across the two repositories so that **a push to the GraphQL API
+runs this suite against that exact commit**, with the result reported as a
+check on the API commit.
 
-Set the following repository variables so CI can locate the API:
+### In this repo — [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
-- `API_REPO_URL` — Git URL of the API repository.
-- `API_REF` *(optional)* — branch/tag to test against (defaults to `main`).
+Fast, secret-free validation of the suite itself:
+
+- `typecheck` — runs on every push/PR and on `main`; installs deps and
+  type-checks with `tsc --noEmit` so the suite always compiles.
+- `run-against-url` — a manual (`workflow_dispatch`) job that runs the full
+  suite against any already-running API. Provide the `api_url` input (e.g. a
+  deployed or preview environment) when dispatching.
+
+### In the API repo — push-triggered end-to-end run
+
+The actual "tests run against the API on push" wiring lives in the **API
+repository**. A ready-to-use workflow is provided here at
+[`ci-templates/api-repo/graphql-api-tests.yml`](ci-templates/api-repo/graphql-api-tests.yml).
+
+To enable it:
+
+1. Copy that file into the API repo at `.github/workflows/graphql-api-tests.yml`.
+2. Commit and push.
+
+On every push (and PR) to the API repo, the workflow:
+
+1. Checks out the API and starts it with `docker compose up -d --build`.
+2. Polls `http://localhost:3000/graphql` until the endpoint responds.
+3. Checks out this **public** test repo (`AleksandarRalis/propeller-sdet-task-tests`).
+4. Installs deps and runs `npm test` with `API_URL=http://localhost:3000/graphql`.
+5. Dumps API logs on failure and tears the stack down afterwards.
+
+No secrets or PATs are required: the test repo is public and only first-party
+GitHub actions (`checkout`, `setup-node`) plus Docker Compose are used.
+
+> **Note:** as documented in [Bugs surfaced by these tests](#bugs-surfaced-by-these-tests),
+> several specs intentionally fail against the current API build. Until those
+> defects are fixed in the API, the CI check will be red — that is the suite
+> doing its job. Once the bugs are fixed, the check goes green.

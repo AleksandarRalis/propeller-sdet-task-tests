@@ -1,0 +1,85 @@
+# ---------------------------------------------------------------------------
+# Copy this file into the GraphQL API repository at:
+#
+#     .github/workflows/graphql-api-tests.yml
+#
+# It builds the API with Docker Compose and runs the external test suite
+# (https://github.com/AleksandarRalis/propeller-sdet-task-tests) against it on
+# every push. The pass/fail result shows up as a check on the API commit.
+#
+# No secrets are required: the test repo is public, and only first-party
+# GitHub actions (checkout / setup-node) plus Docker Compose are used.
+# ---------------------------------------------------------------------------
+name: GraphQL API tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref so a rapid series of pushes only
+# tests the newest commit.
+concurrency:
+  group: api-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-tests:
+    name: Build API & run test suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout API
+        uses: actions/checkout@v4
+
+      - name: Start API (docker compose)
+        run: docker compose up -d --build
+
+      - name: Wait for the GraphQL endpoint
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS -X POST http://localhost:3000/graphql \
+                 -H 'content-type: application/json' \
+                 -d '{"query":"{ __typename }"}' >/dev/null 2>&1; then
+              echo "API is up after $((i * 5))s"
+              exit 0
+            fi
+            echo "Waiting for API to become ready... attempt $i/60"
+            sleep 5
+          done
+          echo "::error::API did not become ready within 5 minutes"
+          docker compose logs --no-color
+          exit 1
+
+      - name: Checkout test suite
+        uses: actions/checkout@v4
+        with:
+          repository: AleksandarRalis/propeller-sdet-task-tests
+          ref: main
+          path: test-suite
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: test-suite/package-lock.json
+
+      - name: Install test dependencies
+        working-directory: test-suite
+        run: npm ci
+
+      - name: Run API test suite
+        working-directory: test-suite
+        env:
+          API_URL: http://localhost:3000/graphql
+          TENANT_A: tenant-a
+          TENANT_B: tenant-b
+        run: npm test
+
+      - name: API logs (on failure)
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
